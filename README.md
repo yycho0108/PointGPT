@@ -233,11 +233,12 @@ The unlabeled hybrid dataset and labeled hybrid dataset are built upon [ModelNet
 ## Reference
 
 ```
-@article{chen2023pointgpt,
-  title={PointGPT: Auto-regressively Generative Pre-training from Point Clouds},
+@article{chen2024pointgpt,
+  title={Pointgpt: Auto-regressively generative pre-training from point clouds},
   author={Chen, Guangyan and Wang, Meiling and Yang, Yi and Yu, Kai and Yuan, Li and Yue, Yufeng},
-  journal={arXiv preprint arXiv:2305.11487},
-  year={2023}
+  journal={Advances in Neural Information Processing Systems},
+  volume={36},
+  year={2024}
 }
 ```
 
