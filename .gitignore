@@ -1,0 +1,11 @@
+# Exclude all __pycache__ directories
+**/__pycache__/
+
+# Exclude all egg-info directories
+**/*.egg-info/
+
+# Exclude all pth files
+**/*.pth
+
+extensions/*/build/
+extensions/*/dist/
