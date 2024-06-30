@@ -1,15 +1,19 @@
 import os
 import sys
+import logging
 # online package
 import torch
 # optimizer
 import torch.optim as optim
 # dataloader
-from datasets import build_dataset_from_cfg
-from models import build_model_from_cfg
+try:
+    from pointgpt.datasets import build_dataset_from_cfg
+except ImportError:
+    logging.warn("skip import dataset")
+from pointgpt.models import build_model_from_cfg
 # utils
-from utils.logger import *
-from utils.misc import *
+from pointgpt.utils.logger import *
+from pointgpt.utils.misc import *
 from timm.scheduler import CosineLRScheduler
 
 

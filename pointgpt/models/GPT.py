@@ -67,6 +67,26 @@ class GPT_extractor(nn.Module):
 
             self.cls_norm = nn.LayerNorm(self.trans_dim)
 
+    def extract_feature(self, h, pos, attn_mask):
+        batch, length, C = h.shape
+
+        h = h.transpose(0, 1)
+        pos = pos.transpose(0, 1)
+
+        # prepend sos token
+        sos = torch.ones(1, batch, self.embed_dim, device=h.device) * self.sos
+        h = torch.cat([sos, h], axis=0)
+
+        # transformer
+        for layer in self.layers:
+            h = layer(h + pos, attn_mask)
+
+        h = self.ln_f(h)
+
+        encoded_points = h.transpose(0, 1)
+       
+        return encoded_points # B, S+1, D 
+
     def forward(self, h, pos, attn_mask, classify=False):
         """
         Expect input as shape [sequence len, batch]

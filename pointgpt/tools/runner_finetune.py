@@ -1,18 +1,19 @@
 import torch
 import torch.nn as nn
-from tools import builder
-from utils import misc, dist_utils
+from pointgpt.tools import builder
+from pointgpt.utils import misc, dist_utils
 import time
-from utils.logger import *
-from utils.AverageMeter import AverageMeter
+from pointgpt.utils.logger import *
+from pointgpt.utils.AverageMeter import AverageMeter
 
 import numpy as np
-from datasets import data_transforms
 from pointnet2_ops import pointnet2_utils
 from torchvision import transforms
 
-
-train_transforms = transforms.Compose(
+import logging
+try: 
+    from pointgpt.datasets import data_transforms
+    train_transforms = transforms.Compose(
     [
         # data_transforms.PointcloudScale(),
         # data_transforms.PointcloudRotate(),
@@ -21,18 +22,18 @@ train_transforms = transforms.Compose(
         # data_transforms.PointcloudRandomInputDropout(),
         # data_transforms.RandomHorizontalFlip(),
         data_transforms.PointcloudScaleAndTranslate(),
-    ]
-)
+    ])
 
-test_transforms = transforms.Compose(
-    [
-        # data_transforms.PointcloudScale(),
-        # data_transforms.PointcloudRotate(),
-        # data_transforms.PointcloudTranslate(),
-        data_transforms.PointcloudScaleAndTranslate(),
-    ]
-)
-
+    test_transforms = transforms.Compose(
+        [
+            # data_transforms.PointcloudScale(),
+            # data_transforms.PointcloudRotate(),
+            # data_transforms.PointcloudTranslate(),
+            data_transforms.PointcloudScaleAndTranslate(),
+        ]
+    )
+except ImportError:
+    logging.warn('Skipping dataset import.')
 
 class Acc_Metric:
     def __init__(self, acc=0.):

@@ -1,0 +1,27 @@
+model:
+  {
+    NAME: PointGPT,
+    cls_dim: 40,
+    group_size: 32,
+    num_group: 64,
+    loss: null,
+    weight_center: 1,
+    skip_decoder: true,
+    transformer_config:
+      {
+        mask_ratio: 0.0,
+        mask_type: "rand",
+        trans_dim: 384,
+        encoder_dims: 384,
+        depth: 12,
+        drop_path_rate: 0.1,
+        num_heads: 6,
+        decoder_depth: 4,
+        decoder_num_heads: 6,
+      },
+  }
+
+npoints: 1024
+total_bs: 64
+step_per_update: 1
+max_epoch: 300

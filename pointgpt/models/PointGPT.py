@@ -5,15 +5,20 @@ import timm
 from timm.models.layers import DropPath, trunc_normal_
 import numpy as np
 from .build import MODELS
-from utils import misc
-from utils.checkpoint import get_missing_parameters_message, get_unexpected_parameters_message
-from utils.logger import *
+from pointgpt.utils import misc
+from pointgpt.utils.checkpoint import get_missing_parameters_message, get_unexpected_parameters_message
+from pointgpt.utils.logger import *
 import random
 from knn_cuda import KNN
-from extensions.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
-from models.GPT import GPT_extractor, GPT_generator
+import logging
+try: 
+    from extensions.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
+except ImportError:
+    logging.warn('Skipping chamfer_dist import.')
+    
+from pointgpt.models.GPT import GPT_extractor, GPT_generator
 import math
-from models.z_order import *
+from pointgpt.models.z_order import *
 
 class Encoder_large(nn.Module):  # Embedding module
     def __init__(self, encoder_channel):
@@ -316,6 +321,7 @@ class GPT_Transformer(nn.Module):
         self.drop_path_rate = config.transformer_config.drop_path_rate
         self.num_heads = config.transformer_config.num_heads
         self.group_size = config.group_size
+        self.skip_decoder = config.get('skip_decoder', False)
         print_log(f'[args] {config.transformer_config}', logger='Transformer')
 
         self.encoder_dims = config.transformer_config.encoder_dims
@@ -337,14 +343,16 @@ class GPT_Transformer(nn.Module):
             group_size=self.group_size,
             pretrained=True,
         )
-
-        self.generator_blocks = GPT_generator(
-            embed_dim=self.encoder_dims,
-            num_heads=self.num_heads,
-            num_layers=self.decoder_depth,
-            trans_dim=self.trans_dim,
-            group_size=self.group_size
-        )
+        if self.skip_decoder:
+            self.generator_blocks = None
+        else:
+            self.generator_blocks = GPT_generator(
+                embed_dim=self.encoder_dims,
+                num_heads=self.num_heads,
+                num_layers=self.decoder_depth,
+                trans_dim=self.trans_dim,
+                group_size=self.group_size
+            )
 
         # do not perform additional mask on the first (self.keep_attend) tokens
         self.keep_attend = 10
@@ -369,6 +377,24 @@ class GPT_Transformer(nn.Module):
             trunc_normal_(m.weight, std=.02)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
+
+    def extract_feature(self, neighborhood, center):
+        group_input_tokens = self.encoder(neighborhood)  # B G C
+
+        batch_size, seq_len, C = group_input_tokens.size()
+
+        sos_pos = self.sos_pos.expand(group_input_tokens.size(0), -1, -1)
+        pos_absolute = self.pos_embed(center)
+        pos_absolute = torch.cat([sos_pos, pos_absolute], dim=1)
+
+        attn_mask = torch.full(
+            (seq_len+1, seq_len+1), -float("Inf"), device=group_input_tokens.device, dtype=group_input_tokens.dtype
+        ).to(torch.bool)
+        attn_mask = torch.triu(attn_mask, diagonal=1)
+        encoded_features = self.blocks.extract_feature(
+                group_input_tokens, pos_absolute, attn_mask)
+        return encoded_features
+        
 
     def forward(self, neighborhood, center, noaug=False, classify=False):
         # generate mask
@@ -458,7 +484,8 @@ class PointGPT(nn.Module):
 
         self.loss = config.loss
 
-        self.build_loss_func(self.loss)
+        if self.loss is not None:
+            self.build_loss_func(self.loss)
 
     def build_loss_func(self, loss_type):
         if loss_type == "cdl1":
@@ -471,6 +498,36 @@ class PointGPT(nn.Module):
         else:
             raise NotImplementedError
         self.loss_func_c = nn.MSELoss().cuda()
+
+    def load_model_from_ckpt(self, bert_ckpt_path):
+        if bert_ckpt_path is not None:
+            ckpt = torch.load(bert_ckpt_path)
+            base_ckpt = {k.replace("module.", ""): v for k,
+                         v in ckpt['base_model'].items()}
+
+        incompatible = self.load_state_dict(base_ckpt, strict=False)
+
+        if incompatible.missing_keys:
+            print_log('missing_keys', logger='Transformer')
+            print_log(
+                get_missing_parameters_message(incompatible.missing_keys),
+                logger='Transformer'
+            )
+        if incompatible.unexpected_keys:
+            print_log('unexpected_keys', logger='Transformer')
+            print_log(
+                get_unexpected_parameters_message(
+                    incompatible.unexpected_keys),
+                logger='Transformer'
+            )
+
+    def extract_embed(self, pts):
+        with torch.inference_mode():
+            neighborhood, center = self.group_divider(pts)
+
+            return self.GPT_Transformer.extract_feature(
+                neighborhood, center
+            )
 
     def forward(self, pts, vis=False, **kwargs):
         neighborhood, center = self.group_divider(pts)
