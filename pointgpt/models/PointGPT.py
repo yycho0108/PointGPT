@@ -10,6 +10,8 @@ from pointgpt.utils.checkpoint import get_missing_parameters_message, get_unexpe
 from pointgpt.utils.logger import *
 import random
 from knn_cuda import KNN
+from pytorch3d.ops import knn_points
+
 import logging
 try: 
     from extensions.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
@@ -111,23 +113,27 @@ class Group(nn.Module):
             0, batch_size, device=xyz.device) * self.num_group
         sorted_indices_list = []
         sorted_indices_list.append(idx_base)
-        distances_batch = distances_batch.view(batch_size, self.num_group, self.num_group).transpose(
-            1, 2).contiguous().view(batch_size * self.num_group, self.num_group)
+        distances_batch = distances_batch.reshape(batch_size, self.num_group, self.num_group).transpose(
+            1, 2).reshape(batch_size * self.num_group, self.num_group)
+            #.contiguous().view(batch_size * self.num_group, self.num_group)
         distances_batch[idx_base] = float("inf")
         distances_batch = distances_batch.view(
-            batch_size, self.num_group, self.num_group).transpose(1, 2).contiguous()
+            batch_size, self.num_group, self.num_group).transpose(1, 2)
+            #.contiguous()
         for i in range(self.num_group - 1):
-            distances_batch = distances_batch.view(
+            distances_batch = distances_batch.reshape(
                 batch_size * self.num_group, self.num_group)
             distances_to_last_batch = distances_batch[sorted_indices_list[-1]]
             closest_point_idx = torch.argmin(distances_to_last_batch, dim=-1)
             closest_point_idx = closest_point_idx + idx_base
             sorted_indices_list.append(closest_point_idx)
-            distances_batch = distances_batch.view(batch_size, self.num_group, self.num_group).transpose(
-                1, 2).contiguous().view(batch_size * self.num_group, self.num_group)
+            distances_batch = distances_batch.reshape(batch_size, self.num_group, self.num_group).transpose(
+                1, 2).reshape(batch_size * self.num_group, self.num_group)
+                #.contiguous().view(batch_size * self.num_group, self.num_group)
             distances_batch[closest_point_idx] = float("inf")
             distances_batch = distances_batch.view(
-                batch_size, self.num_group, self.num_group).transpose(1, 2).contiguous()
+                batch_size, self.num_group, self.num_group).transpose(1, 2)
+                #.contiguous()
         sorted_indices = torch.stack(sorted_indices_list, dim=-1)
         sorted_indices = sorted_indices.view(-1)
         return sorted_indices
@@ -161,7 +167,10 @@ class Group(nn.Module):
         # fps the centers out
         center = misc.fps(xyz, self.num_group)  # B G 3
         # knn to get the neighborhood
-        _, idx = self.knn(xyz, center)  # B G M
+        # _, idx = self.knn(xyz, center)  # B G M
+        o = knn_points(center, xyz, K=self.group_size,
+            return_sorted=False)
+        idx = o.idx
         assert idx.size(1) == self.num_group
         assert idx.size(2) == self.group_size
         idx_base = torch.arange(
@@ -169,8 +178,9 @@ class Group(nn.Module):
         idx = idx + idx_base
         idx = idx.view(-1)
         neighborhood = xyz.view(batch_size * num_points, -1)[idx, :]
-        neighborhood = neighborhood.view(
-            batch_size, self.num_group, self.group_size, 3).contiguous()
+        neighborhood = neighborhood.reshape(
+            batch_size, self.num_group, self.group_size, 3)
+            #.contiguous()
         # normalize
         neighborhood = neighborhood - center.unsqueeze(2)
 
@@ -180,11 +190,13 @@ class Group(nn.Module):
         neighborhood = neighborhood.view(
             batch_size * self.num_group, self.group_size, 3)[sorted_indices, :, :]
         neighborhood = neighborhood.view(
-            batch_size, self.num_group, self.group_size, 3).contiguous()
+            batch_size, self.num_group, self.group_size, 3)
+            #.contiguous()
         center = center.view(
             batch_size * self.num_group, 3)[sorted_indices, :]
         center = center.view(
-            batch_size, self.num_group, 3).contiguous()
+            batch_size, self.num_group, 3)
+            #.contiguous()
 
         return neighborhood, center
 
@@ -282,6 +294,12 @@ class PositionEmbeddingCoordsSine(nn.Module):
             scale = 1.0
         self.scale = scale * 2 * math.pi
 
+        dim_t = torch.arange(self.num_pos_feats,
+                             dtype=torch.float32)
+        dim_t = self.temperature ** (2 * torch.div(dim_t,
+                                     2, rounding_mode='trunc') / self.num_pos_feats)
+        self.register_buffer('dim_t', dim_t)
+
     def forward(self, xyz: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -292,10 +310,11 @@ class PositionEmbeddingCoordsSine(nn.Module):
         """
         assert xyz.shape[-1] == self.n_dim
 
-        dim_t = torch.arange(self.num_pos_feats,
-                             dtype=torch.float32, device=xyz.device)
-        dim_t = self.temperature ** (2 * torch.div(dim_t,
-                                     2, rounding_mode='trunc') / self.num_pos_feats)
+        # dim_t = torch.arange(self.num_pos_feats,
+        #                      dtype=torch.float32, device=xyz.device)
+        # dim_t = self.temperature ** (2 * torch.div(dim_t,
+        #                              2, rounding_mode='trunc') / self.num_pos_feats)
+        dim_t = self.dim_t
 
         xyz = xyz * self.scale
         pos_divided = xyz.unsqueeze(-1) / dim_t
