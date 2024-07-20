@@ -5,12 +5,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+from pointgpt.models.custom_mha import MultiheadAttention
+
 class Block(nn.Module):
     def __init__(self, embed_dim, num_heads):
         super(Block, self).__init__()
         self.ln_1 = nn.LayerNorm(embed_dim)
         self.ln_2 = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads)
+        self.attn = MultiheadAttention(embed_dim, num_heads)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
@@ -21,7 +23,11 @@ class Block(nn.Module):
 
         x = self.ln_1(x)
         # a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
-        a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
+        a, _ = self.attn(x, x, x,
+                         attn_mask=attn_mask,
+                         # is_causal=True,
+                         need_weights=False
+                         )
         x = x + a
         m = self.mlp(self.ln_2(x))
         x = x + m
@@ -57,11 +63,13 @@ class GPT_extractor(nn.Module):
                 nn.Linear(self.trans_dim * 2, 256),
                 nn.BatchNorm1d(256),
                 nn.ReLU(inplace=True),
-                nn.Dropout(0.5),
+                #nn.Dropout(0.5),
+                nn.Identity(),
                 nn.Linear(256, 256),
                 nn.BatchNorm1d(256),
                 nn.ReLU(inplace=True),
-                nn.Dropout(0.5),
+                # nn.Dropout(0.5),
+                nn.Identity(),
                 nn.Linear(256, num_classes)
             )
 

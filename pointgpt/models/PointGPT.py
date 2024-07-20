@@ -9,7 +9,7 @@ from pointgpt.utils import misc
 from pointgpt.utils.checkpoint import get_missing_parameters_message, get_unexpected_parameters_message
 from pointgpt.utils.logger import *
 import random
-from knn_cuda import KNN
+# from knn_cuda import KNN
 from pytorch3d.ops import knn_points
 
 import logging
@@ -86,11 +86,11 @@ class Encoder_small(nn.Module):  # Embedding module
         point_groups = point_groups.reshape(bs * g, n, 3)
         # encoder
         feature = self.first_conv(point_groups.transpose(2, 1))
-        feature_global = torch.max(feature, dim=2, keepdim=True)[0]
+        feature_global = torch.amax(feature, dim=2, keepdim=True)#[0]
         feature = torch.cat(
             [feature_global.expand(-1, -1, n), feature], dim=1)
         feature = self.second_conv(feature)
-        feature_global = torch.max(feature, dim=2, keepdim=False)[0]
+        feature_global = torch.amax(feature, dim=2, keepdim=False)#[0]
         return feature_global.reshape(bs, g, self.encoder_channel)
 
 
@@ -99,8 +99,8 @@ class Group(nn.Module):
         super().__init__()
         self.num_group = num_group
         self.group_size = group_size
-        self.knn = KNN(k=self.group_size, transpose_mode=True)
-        self.knn_2 = KNN(k=1, transpose_mode=True)
+        # self.knn = KNN(k=self.group_size, transpose_mode=True)
+        # self.knn_2 = KNN(k=1, transpose_mode=True)
 
     def simplied_morton_sorting(self, xyz, center):
         '''
@@ -210,7 +210,8 @@ class Mlp(nn.Module):
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
+        # self.drop = nn.Dropout(drop)
+        self.drop = nn.Identity()
 
     def forward(self, x):
         x = self.fc1(x)
@@ -228,9 +229,9 @@ class Attention(nn.Module):
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.attn_drop = nn.Identity()#nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.proj_drop = nn.Identity()#nn.Dropout(proj_drop)
 
     def forward(self, x):
         B, N, C = x.shape
@@ -324,7 +325,12 @@ class PositionEmbeddingCoordsSine(nn.Module):
                               1).reshape(*xyz.shape[:-1], -1)
 
         # Pad unused dimensions with zeros
-        pos_emb = F.pad(pos_emb, (0, self.padding))
+        # pos_emb = F.pad(pos_emb, (0, self.padding))
+        zeros = torch.zeros((*pos_emb.shape[:-1], self.padding),
+                            dtype=pos_emb.dtype,
+                            device=pos_emb.device)
+        pos_emb = torch.cat([pos_emb, zeros], dim=-1)
+
         return pos_emb
 
 
@@ -407,9 +413,15 @@ class GPT_Transformer(nn.Module):
         pos_absolute = torch.cat([sos_pos, pos_absolute], dim=1)
 
         attn_mask = torch.full(
-            (seq_len+1, seq_len+1), -float("Inf"), device=group_input_tokens.device, dtype=group_input_tokens.dtype
+            (seq_len+1, seq_len+1),
+            -float("Inf"),
+            device=group_input_tokens.device,
+            dtype=group_input_tokens.dtype
         ).to(torch.bool)
         attn_mask = torch.triu(attn_mask, diagonal=1)
+        # print('attn_mask', attn_mask,
+        #       torch.ones(seq_len+1, seq_len+1, dtype=torch.bool).tril(diagonal=0)
+        #       )
         encoded_features = self.blocks.extract_feature(
                 group_input_tokens, pos_absolute, attn_mask)
         return encoded_features
@@ -470,17 +482,17 @@ class GPT_Transformer(nn.Module):
             attn_mask = attn_mask | overall_mask.unsqueeze(0) & ~eye_mask
 
         # transformer
-        if classify == False:
-            encoded_features = self.blocks(
-                group_input_tokens, pos_absolute, attn_mask, classify=classify)
-            generated_points = self.generator_blocks(
-                encoded_features, pos_relative, attn_mask)
-            return generated_points
-        else:
-            print('----error---- This code is detached ----error----')
-            logits, generated_points = self.blocks(
-                group_input_tokens, pos_absolute, classify=classify)
-            return logits, generated_points
+        # if classify == False:
+        encoded_features = self.blocks(
+            group_input_tokens, pos_absolute, attn_mask, classify=classify)
+        generated_points = self.generator_blocks(
+            encoded_features, pos_relative, attn_mask)
+        return generated_points
+        #else:
+        #    print('----error---- This code is detached ----error----')
+        #    logits, generated_points = self.blocks(
+        #        group_input_tokens, pos_absolute, classify=classify)
+        #    return logits, generated_points
 
 
 @MODELS.register_module()
@@ -540,13 +552,16 @@ class PointGPT(nn.Module):
                 logger='Transformer'
             )
 
-    def extract_embed(self, pts):
-        with torch.inference_mode():
-            neighborhood, center = self.group_divider(pts)
+    def extract_embed_inner(self,
+                            neighborhood:torch.Tensor,
+                            center:torch.Tensor):
+        return self.GPT_Transformer.extract_feature(
+            neighborhood, center
+        )
 
-            return self.GPT_Transformer.extract_feature(
-                neighborhood, center
-            )
+    def extract_embed(self, pts, neighborhood=None, center=None):
+        neighborhood, center = self.group_divider(pts)
+        return self.extract_embed_inner(pts,neighborhood,center)
 
     def forward(self, pts, vis=False, **kwargs):
         neighborhood, center = self.group_divider(pts)
@@ -561,16 +576,16 @@ class PointGPT(nn.Module):
         loss1 = self.loss_func_p1(generated_points, gt_points)
         loss2 = self.loss_func_p2(generated_points, gt_points)
 
-        if vis:  # visualization
-            gt_points = gt_points.reshape(
-                B, self.num_group, self.group_size, 3)
-            gt_points = (gt_points + center.unsqueeze(-2)
-                         ).reshape(-1, 3).unsqueeze(0)
-            generated_points = generated_points.reshape(
-                B, self.num_group, self.group_size, 3) + center.unsqueeze(-2)
-            generated_points = generated_points.reshape(-1, 3).unsqueeze(0)
+        # if vis:  # visualization
+        #     gt_points = gt_points.reshape(
+        #         B, self.num_group, self.group_size, 3)
+        #     gt_points = (gt_points + center.unsqueeze(-2)
+        #                  ).reshape(-1, 3).unsqueeze(0)
+        #     generated_points = generated_points.reshape(
+        #         B, self.num_group, self.group_size, 3) + center.unsqueeze(-2)
+        #     generated_points = generated_points.reshape(-1, 3).unsqueeze(0)
 
-            return generated_points, gt_points, center
+        #     return generated_points, gt_points, center
 
         return loss1 + loss2
 

@@ -5,7 +5,8 @@ from timm.models.layers import DropPath, trunc_normal_
 from logger import get_missing_parameters_message, get_unexpected_parameters_message
 
 from pointnet2_ops import pointnet2_utils
-from knn_cuda import KNN
+# from knn_cuda import KNN
+from pytorch3d.ops import knn_points
 from pointnet2_utils import PointNetFeaturePropagation
 from gpt2_seg import GPT_extractor, GPT_generator
 import math
@@ -30,8 +31,8 @@ class Group(nn.Module):
         super().__init__()
         self.num_group = num_group
         self.group_size = group_size
-        self.knn = KNN(k=self.group_size, transpose_mode=True)
-        self.knn_2 = KNN(k=1, transpose_mode=True)
+        # self.knn = KNN(k=self.group_size, transpose_mode=True)
+        # self.knn_2 = KNN(k=1, transpose_mode=True)
 
     def simplied_morton_sorting(self, xyz, center):
         batch_size, num_points, _ = xyz.shape
@@ -91,7 +92,10 @@ class Group(nn.Module):
         # fps the centers out
         center = fps(xyz, self.num_group)  # B G 3
         # knn to get the neighborhood
-        _, idx = self.knn(xyz, center)  # B G M
+        # _, idx = self.knn(xyz, center)  # B G M
+        o = knn_points(center, xyz, K=self.group_size,
+            return_sorted=False)
+        idx = o.idx
         assert idx.size(1) == self.num_group
         assert idx.size(2) == self.group_size
         idx_base = torch.arange(
