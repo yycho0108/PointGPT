@@ -13,10 +13,10 @@ class Block(nn.Module):
         super(Block, self).__init__()
         self.ln_1 = nn.LayerNorm(embed_dim)
         self.ln_2 = nn.LayerNorm(embed_dim)
-        # self.attn = MultiheadAttention(embed_dim, num_heads)
-        self.attn = MHA(embed_dim, num_heads,
-                        use_flash_attn=True,
-                        causal=True)
+        self.attn = MultiheadAttention(embed_dim, num_heads)
+        #self.attn = MHA(embed_dim, num_heads,
+        #                use_flash_attn=True,
+        #                causal=True)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
@@ -30,12 +30,10 @@ class Block(nn.Module):
         #      attn_mask)
 
         x = self.ln_1(x)
-        # a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
-        a = self.attn(x,# x, x,
-                         # attn_mask=attn_mask,
-                         # is_causal=True,
-                         # need_weights=False
-                         )
+        a, _ = self.attn(x, x, x, attn_mask=attn_mask,
+                         need_weights=False,
+                         is_causal=True)
+        # a = self.attn(x)
         x = x + a
         m = self.mlp(self.ln_2(x))
         x = x + m
