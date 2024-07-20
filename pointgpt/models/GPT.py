@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
+from flash_attn.modules.mha import MHA
 
 
 from pointgpt.models.custom_mha import MultiheadAttention
@@ -12,7 +13,10 @@ class Block(nn.Module):
         super(Block, self).__init__()
         self.ln_1 = nn.LayerNorm(embed_dim)
         self.ln_2 = nn.LayerNorm(embed_dim)
-        self.attn = MultiheadAttention(embed_dim, num_heads)
+        # self.attn = MultiheadAttention(embed_dim, num_heads)
+        self.attn = MHA(embed_dim, num_heads,
+                        use_flash_attn=True,
+                        causal=True)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
@@ -20,13 +24,17 @@ class Block(nn.Module):
         )
 
     def forward(self, x, attn_mask):
+        #print('attn_mask',
+        #      attn_mask.dtype,
+        #      attn_mask.shape,
+        #      attn_mask)
 
         x = self.ln_1(x)
         # a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
-        a, _ = self.attn(x, x, x,
-                         attn_mask=attn_mask,
+        a = self.attn(x,# x, x,
+                         # attn_mask=attn_mask,
                          # is_causal=True,
-                         need_weights=False
+                         # need_weights=False
                          )
         x = x + a
         m = self.mlp(self.ln_2(x))

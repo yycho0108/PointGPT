@@ -5,7 +5,7 @@ import torch
 import time
 import numpy as np
 import tensorrt as trt
-import pycuda.autoinit
+# import pycuda.autoinit
 # import pycuda.driver as cuda
 from cuda import cuda, cudart
 
@@ -122,16 +122,16 @@ def allocate_buffers(engine: trt.ICudaEngine,
 def _do_inference_base(inputs, outputs, stream, execute_async_func):
     # Transfer input data to the GPU.
     kind = cudart.cudaMemcpyKind.cudaMemcpyHostToDevice
-    [cuda_call(cudart.cudaMemcpyAsync(inp.device, inp.host,
-               inp.nbytes, kind, stream)) for inp in inputs]
+    #[cuda_call(cudart.cudaMemcpyAsync(inp.device, inp.host,
+    #           inp.nbytes, kind, stream)) for inp in inputs]
     # Run inference.
     execute_async_func()
     # Transfer predictions back from the GPU.
     kind = cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost
-    [cuda_call(cudart.cudaMemcpyAsync(out.host, out.device,
-               out.nbytes, kind, stream)) for out in outputs]
+    #[cuda_call(cudart.cudaMemcpyAsync(out.host, out.device,
+    #           out.nbytes, kind, stream)) for out in outputs]
     # Synchronize the stream
-    cuda_call(cudart.cudaStreamSynchronize(stream))
+    # cuda_call(cudart.cudaStreamSynchronize(stream))
     # Return only the host outputs.
     return [out.host for out in outputs]
 
@@ -200,7 +200,11 @@ def main():
             stream=stream)
         t1 = time.time()
         dts.append(t1 - t0)
-    print('avg. dt', np.mean(dts))
+    cuda_call(cudart.cudaStreamSynchronize(stream))
+    t2 = time.time()
+    dts.append(t2 - t1)
+    print('dts', dts[1:])
+    print('avg. dt', np.mean(dts[1:]))
     print(output)
 
     # context.execute_async_v2(

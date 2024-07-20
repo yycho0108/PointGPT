@@ -285,4 +285,5 @@ def build_from_cfg(cfg, registry, default_args=None):
         return obj_cls(cfg)
     except Exception as e:
         # Normal TypeError does not print class name.
-        raise type(e)(f'{obj_cls.__name__}: {e}')
+        print(type(e)(f'{obj_cls.__name__}: {e}'))
+        raise

@@ -120,7 +120,7 @@ class MyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         pointgpt_cfg = cfg_from_yaml_file(
-            "/tmp/PointGPT/pointgpt/cfgs/PointGPT-S/no-decoder.yaml")
+            "./pointgpt/cfgs/PointGPT-S/no-decoder.yaml")
         self.model = builder.model_builder(pointgpt_cfg.model)
 
     def forward(self,
@@ -129,154 +129,154 @@ class MyModel(torch.nn.Module):
         with torch.cuda.amp.autocast():
             return self.model.extract_embed_inner(nbr, ctr)[..., 1:, :]
 
+if __name__ == '__main__':
+    INPUT_SHAPE = ((1024, 32, 32, 3),
+                (1024, 32, 3))
+    OUTPUT_SHAPE = (1024, 32, 384)
+    onnx_filename = 'pointgpt.onnx'
 
-INPUT_SHAPE = ((1024, 32, 32, 3),
-               (1024, 32, 3))
-OUTPUT_SHAPE = (1024, 32, 384)
-onnx_filename = 'pointgpt.onnx'
+    if EXPORT_ONNX:
+        model = MyModel()
+        dummy_input = tuple([torch.randn(*s) for s in INPUT_SHAPE])
+        model(*dummy_input)
+    # output: B G M 3
+    # center : B G 3
 
-if EXPORT_ONNX:
-    model = MyModel()
-    dummy_input = tuple([torch.randn(*s) for s in INPUT_SHAPE])
-    model(*dummy_input)
-# output: B G M 3
-# center : B G 3
+    # Create an instance of the PyTorch model
+    # INPUT_SHAPE = (1024, 512, 3)
 
-# Create an instance of the PyTorch model
-# INPUT_SHAPE = (1024, 512, 3)
+    if EXPORT_ONNX:
+        # Export the PyTorch model to ONNX
+        dummy_input = tuple([torch.randn(*s) for s in INPUT_SHAPE])
+        torch.onnx.export(model,
+                        dummy_input,
+                        onnx_filename,
+                        verbose=True,
+                        custom_opsets={'torch.onnx': OPSET},
+                        input_names=['nbr', 'ctr'],
+                        # output_names=['output'],
+                        opset_version=OPSET
+                        )
 
-if EXPORT_ONNX:
-    # Export the PyTorch model to ONNX
-    dummy_input = tuple([torch.randn(*s) for s in INPUT_SHAPE])
-    torch.onnx.export(model,
-                      dummy_input,
-                      onnx_filename,
-                      verbose=True,
-                      custom_opsets={'torch.onnx': OPSET},
-                      input_names=['nbr', 'ctr'],
-                      # output_names=['output'],
-                      opset_version=OPSET
-                      )
+    # Load the ONNX model
+    print('LOAD', flush=True)
+    model_onnx = onnx.load(onnx_filename)
+    # model_onnx = float16.convert_float_to_float16(model_onnx)
 
-# Load the ONNX model
-print('LOAD', flush=True)
-model_onnx = onnx.load(onnx_filename)
-# model_onnx = float16.convert_float_to_float16(model_onnx)
+    print('node 20?', model_onnx.graph.node[20])
+    print('node 20?', model_onnx.graph.node[19])
+    print('node name', model_onnx.graph.node[19].name)
+    print('node name', model_onnx.graph.node[19].output)
+    # print(model_onnx)
 
-print('node 20?', model_onnx.graph.node[20])
-print('node 20?', model_onnx.graph.node[19])
-print('node name', model_onnx.graph.node[19].name)
-print('node name', model_onnx.graph.node[19].output)
-# print(model_onnx)
+    # Create a TensorRT builder and network
+    print('Builder')
+    builder = trt.Builder(trt.Logger(trt.Logger.INFO))
+    # explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    print('Create_network')
+    explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED)
+    network = builder.create_network(explicit_batch)
+    # network = builder.create_network()
 
-# Create a TensorRT builder and network
-print('Builder')
-builder = trt.Builder(trt.Logger(trt.Logger.INFO))
-# explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-print('Create_network')
-explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED)
-network = builder.create_network(explicit_batch)
-# network = builder.create_network()
+    # Create an ONNX-TensorRT backend
+    print('Create_parser', flush=True)
+    parser = trt.OnnxParser(network, builder.logger)
+    print('parse', flush=True)
+    parse_output = parser.parse(model_onnx.SerializeToString())
+    print('parse_output', parse_output,
+        flush=True)
+    print('network 20?',
+        network.get_layer(19).get_output(0).shape,
+        network.get_layer(20).get_output(0).shape,
+        'type', network.get_layer(20).type,
+        'name', network.get_layer(20).name
+        )
+    for i in range(network.num_layers):
+        print(network.get_layer(i).type,
+            network.get_layer(i).name)
+    # print('GLOT',
+    #       parser.get_layer_output_tensor('n20', 0).shape
+    #       )
+    print('??error??', flush=True)
+    for idx in range(parser.num_errors):
+        print(parser.get_error(idx))
+    print('??error??')
+    if True:
+        print('num layer?', network.num_layers)
+        last_layer = network.get_layer(network.num_layers - 1)
+        print('last_layer', last_layer)
+        # Check if last layer recognizes it's output
+        if not last_layer.get_output(0):
+            # If not, then mark the output using TensorRT API
+            print(last_layer.get_output(0))
+            network.mark_output(last_layer.get_output(0))
+    print(network.num_inputs)
+    print(network.num_outputs)
 
-# Create an ONNX-TensorRT backend
-print('Create_parser', flush=True)
-parser = trt.OnnxParser(network, builder.logger)
-print('parse', flush=True)
-parse_output = parser.parse(model_onnx.SerializeToString())
-print('parse_output', parse_output,
-      flush=True)
-print('network 20?',
-      network.get_layer(19).get_output(0).shape,
-      network.get_layer(20).get_output(0).shape,
-      'type', network.get_layer(20).type,
-      'name', network.get_layer(20).name
-      )
-for i in range(network.num_layers):
-    print(network.get_layer(i).type,
-          network.get_layer(i).name)
-# print('GLOT',
-#       parser.get_layer_output_tensor('n20', 0).shape
-#       )
-print('??error??', flush=True)
-for idx in range(parser.num_errors):
-    print(parser.get_error(idx))
-print('??error??')
-if True:
-    print('num layer?', network.num_layers)
-    last_layer = network.get_layer(network.num_layers - 1)
-    print('last_layer', last_layer)
-    # Check if last layer recognizes it's output
-    if not last_layer.get_output(0):
-        # If not, then mark the output using TensorRT API
-        print(last_layer.get_output(0))
-        network.mark_output(last_layer.get_output(0))
-print(network.num_inputs)
-print(network.num_outputs)
+    print(network)
 
-print(network)
+    # Set up optimization profile and builder parameters
+    profile = builder.create_optimization_profile()
+    for k, v in zip(['nbr', 'ctr'], INPUT_SHAPE):
+        profile.set_shape(k, v, v, v)
+    # profile.set_shape('output', OUTPUT_SHAPE,
+    #                   OUTPUT_SHAPE,
+    #                   OUTPUT_SHAPE)
+    builder_config = builder.create_builder_config()
+    # hmm~
+    # builder_config.set_flag(trt.BuilderFlag.FP16)
 
-# Set up optimization profile and builder parameters
-profile = builder.create_optimization_profile()
-for k, v in zip(['nbr', 'ctr'], INPUT_SHAPE):
-    profile.set_shape(k, v, v, v)
-# profile.set_shape('output', OUTPUT_SHAPE,
-#                   OUTPUT_SHAPE,
-#                   OUTPUT_SHAPE)
-builder_config = builder.create_builder_config()
-# hmm~
-# builder_config.set_flag(trt.BuilderFlag.FP16)
+    print(dir(builder_config))
+    # ???
+    # builder_config.max_workspace_size = 1 << 30
+    builder_config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)
+    # builder_config.set_flag(trt.BuilderFlag.SAFETY_SCOPE
+    # builder_config.flags = 1 << int(trt.BuilderFlag.STRICT_TYPES)
 
-print(dir(builder_config))
-# ???
-# builder_config.max_workspace_size = 1 << 30
-builder_config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)
-# builder_config.set_flag(trt.BuilderFlag.SAFETY_SCOPE
-# builder_config.flags = 1 << int(trt.BuilderFlag.STRICT_TYPES)
+    # Build the TensorRT engine from the optimized network
+    # engine = builder.build_engine(network, builder_config)
+    # print('hmm~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    #       parser.get_layer_output_tensor('n20', 0).shape
+    #       )
+    print('support?',
+        builder.is_network_supported(network,
+                                    builder_config)
+        )
+    engine = builder.build_serialized_network(network, builder_config)
+    if True:
+        try:
+            with open('pointgpt.trt', "wb") as fp:
+                fp.write(engine)
+        except BaseException:
+            with open('pointgpt.trt', 'wb') as fp:
+                fp.write(engine.serialize())
+        # Allocate device memory for input and output buffers
+        input_name = 'input'
+        output_name = 'output'
+        input_shape = INPUT_SHAPE
+        output_shape = OUTPUT_SHAPE
+        input_buf = trt.cuda.alloc_buffer(
+            builder.max_batch_size * sum([trt.volume(s) for s in INPUT_SHAPE]) *
+            trt.float32.itemsize)
+        output_buf = trt.cuda.alloc_buffer(
+            builder.max_batch_size * sum([trt.volume(s) for s in OUTPUT_SHAPE]) *
+            trt.float32.itemsize)
 
-# Build the TensorRT engine from the optimized network
-# engine = builder.build_engine(network, builder_config)
-# print('hmm~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
-#       parser.get_layer_output_tensor('n20', 0).shape
-#       )
-print('support?',
-      builder.is_network_supported(network,
-                                   builder_config)
-      )
-engine = builder.build_serialized_network(network, builder_config)
-if True:
-    try:
-        with open('pointgpt.trt', "wb") as fp:
-            fp.write(engine)
-    except BaseException:
-        with open('pointgpt.trt', 'wb') as fp:
-            fp.write(engine.serialize())
-    # Allocate device memory for input and output buffers
-    input_name = 'input'
-    output_name = 'output'
-    input_shape = INPUT_SHAPE
-    output_shape = OUTPUT_SHAPE
-    input_buf = trt.cuda.alloc_buffer(
-        builder.max_batch_size * sum([trt.volume(s) for s in INPUT_SHAPE]) *
-        trt.float32.itemsize)
-    output_buf = trt.cuda.alloc_buffer(
-        builder.max_batch_size * sum([trt.volume(s) for s in OUTPUT_SHAPE]) *
-        trt.float32.itemsize)
+        # Create a TensorRT execution context
+        context = engine.create_execution_context()
 
-    # Create a TensorRT execution context
-    context = engine.create_execution_context()
+        # Run inference on the TensorRT engine
+        input_data = tuple([torch.randn(*s).numpy()
+                            for s in INPUT_SHAPE])
+        output_data = np.empty(output_shape, dtype=np.float32)
+        input_buf.host = input_data.ravel()
+        trt_outputs = [output_buf.device]
+        trt_inputs = [input_buf.device]
+        context.execute_async_v2(
+            bindings=trt_inputs + trt_outputs,
+            stream_handle=trt.cuda.Stream())
+        output_buf.device_to_host()
+        output_data[:] = np.reshape(output_buf.host, output_shape)
 
-    # Run inference on the TensorRT engine
-    input_data = tuple([torch.randn(*s).numpy()
-                        for s in INPUT_SHAPE])
-    output_data = np.empty(output_shape, dtype=np.float32)
-    input_buf.host = input_data.ravel()
-    trt_outputs = [output_buf.device]
-    trt_inputs = [input_buf.device]
-    context.execute_async_v2(
-        bindings=trt_inputs + trt_outputs,
-        stream_handle=trt.cuda.Stream())
-    output_buf.device_to_host()
-    output_data[:] = np.reshape(output_buf.host, output_shape)
-
-    # Print the output
-    print(output_data)
+        # Print the output
+        print(output_data)

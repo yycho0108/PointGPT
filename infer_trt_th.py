@@ -80,11 +80,13 @@ def main():
                         device='cuda')
     }
     dts = []
-    for _ in range(128):
-        t0 = time.time()
-        output = net(inputs)
-        t1 = time.time()
-        dts.append(t1 - t0)
+    s = th.cuda.Stream()
+    with th.cuda.stream(s):
+        for _ in range(128):
+            t0 = time.time()
+            output = net(inputs)
+            t1 = time.time()
+            dts.append(t1 - t0)
     print(dts[1:])
     print(np.mean(dts[1:]))
 
