@@ -3,10 +3,9 @@
 import tensorrt as trt
 
 import onnx
-import onnxscript
+# import onnxscript
 from onnxconverter_common import float16
-
-from onnxscript.onnx_opset import opset17 as op
+# from onnxscript.onnx_opset import opset17 as op
 
 import onnx_tensorrt.backend as backend
 import torch
@@ -18,7 +17,7 @@ from pointgpt.tools import builder
 EXPORT_ONNX: bool = True
 OPSET: int = 17
 
-custom_opset = onnxscript.values.Opset(domain="torch.onnx", version=OPSET)
+# custom_opset = onnxscript.values.Opset(domain="torch.onnx", version=OPSET)
 
 
 if False:
