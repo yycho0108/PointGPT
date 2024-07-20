@@ -119,7 +119,7 @@ def native_scaled_dot_product_attention(query, key, value, attn_mask=None,
         assert attn_mask is None
         temp_mask = torch.ones(L, S, dtype=torch.bool,
                                device=attn_bias.device).tril(diagonal=0)
-        attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+        attn_bias.masked_fill_(th.logical_not(temp_mask), float("-inf"))
         attn_bias.to(query.dtype)
 
     if attn_mask is not None:
