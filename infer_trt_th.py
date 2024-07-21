@@ -7,6 +7,7 @@ import numpy as np
 import tensorrt as trt
 import torch as th
 import torch.nn as nn
+from pkm.util.torch_util import set_seed
 
 
 class TRTWrapper(nn.Module):
@@ -70,21 +71,27 @@ class TRTWrapper(nn.Module):
 
 
 def main():
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES']='1'
     net = TRTWrapper()
+
+    set_seed(0)
     inputs = {
-        'nbr': th.zeros(size=(1024, 32, 32, 3),
+        'nbr': th.randn(size=(3*1024, 32, 32, 3),
                         dtype=th.float32,
                         device='cuda'),
-        'ctr': th.zeros(size=(1024, 32, 3),
+        'ctr': th.randn(size=(3*1024, 32, 3),
                         dtype=th.float32,
                         device='cuda')
     }
     dts = []
     s = th.cuda.Stream()
     with th.cuda.stream(s):
-        for _ in range(128):
+        for i in range(128):
             t0 = time.time()
             output = net(inputs)
+            if i == 0:
+                print(output)
             t1 = time.time()
             dts.append(t1 - t0)
     print(dts[1:])

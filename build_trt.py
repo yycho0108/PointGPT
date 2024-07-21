@@ -4,7 +4,7 @@ import tensorrt as trt
 
 import onnx
 # import onnxscript
-from onnxconverter_common import float16
+# from onnxconverter_common import float16
 # from onnxscript.onnx_opset import opset17 as op
 
 import onnx_tensorrt.backend as backend
@@ -122,17 +122,21 @@ class MyModel(torch.nn.Module):
         pointgpt_cfg = cfg_from_yaml_file(
             "./pointgpt/cfgs/PointGPT-S/no-decoder.yaml")
         self.model = builder.model_builder(pointgpt_cfg.model)
+        self.model.load_model_from_ckpt('/tmp/PointGPT/pretrained.pth')
+        self.model.eval()
+
 
     def forward(self,
                 nbr: torch.Tensor,
                 ctr: torch.Tensor):
-        with torch.cuda.amp.autocast():
+        with torch.no_grad():
+            #with torch.cuda.amp.autocast():
             return self.model.extract_embed_inner(nbr, ctr)[..., 1:, :]
 
 if __name__ == '__main__':
-    INPUT_SHAPE = ((1024, 32, 32, 3),
-                (1024, 32, 3))
-    OUTPUT_SHAPE = (1024, 32, 384)
+    INPUT_SHAPE = ((3*1024, 32, 32, 3),
+                (3*1024, 32, 3))
+    OUTPUT_SHAPE = (3*1024, 32, 384)
     onnx_filename = 'pointgpt.onnx'
 
     if EXPORT_ONNX:
@@ -229,7 +233,7 @@ if __name__ == '__main__':
     print(dir(builder_config))
     # ???
     # builder_config.max_workspace_size = 1 << 30
-    builder_config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)
+    builder_config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 8 << 30)
     # builder_config.set_flag(trt.BuilderFlag.SAFETY_SCOPE
     # builder_config.flags = 1 << int(trt.BuilderFlag.STRICT_TYPES)
 
